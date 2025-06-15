@@ -1,0 +1,111 @@
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: always
+    platform: linux/amd64
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=test
+    env_file:
+      - ./hadoop.env
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: always
+    platform: linux/amd64
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    env_file:
+      - ./hadoop.env
+
+  spark-master:
+    image: bde2020/spark-master:3.0.0-hadoop3.2
+    container_name: spark-master
+    platform: linux/amd64
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - ../target:/opt/spark-apps
+
+  spark-worker-1:
+    image: bde2020/spark-worker:3.0.0-hadoop3.2
+    container_name: spark-worker-1
+    depends_on:
+      - spark-master
+    platform: linux/amd64
+    ports:
+      - "8081:8081"
+    environment:
+      - "SPARK_MASTER=spark://spark-master:7077"
+    env_file:
+      - ./hadoop.env
+
+  hive-metastore-db:
+    image: postgres:12
+    container_name: hive-metastore-db
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+      POSTGRES_DB: metastore
+    volumes:
+      - hive_metastore_db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  hive-metastore:
+    image: bde2020/hive-metastore-postgresql:2.3.0
+    container_name: hive-metastore
+    platform: linux/amd64
+    env_file:
+      - ./hadoop.env
+    environment:
+      POSTGRES_HOST: hive-metastore-db # Point to the PostgreSQL service
+      SERVICE_PRECONDITION: "hive-metastore-db:5432"
+    ports:
+      - "9083:9083"
+    depends_on:
+      - hive-metastore-db
+
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-server
+    platform: linux/amd64
+    env_file:
+      - ./hadoop.env
+    environment:
+      HIVE_SITE_hive_metastore_uris: "thrift://hive-metastore:9083" # Connect to our Hive Metastore service
+      # By default, Hive will use MapReduce. With YARN removed, it will use local MapReduce.
+      # If you want to try experimental Hive on Standalone Spark (may require Spark JARS in Hive image or classpath):
+      # HIVE_SITE_hive_execution_engine: "spark"
+      # HIVE_SITE_spark_master: "spark://spark-master:7077"
+      # SPARK_HOME: "/opt/spark" # If spark is available in this image at this path
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864 spark-master:7077 hive-metastore:9083"
+    ports:
+      - "10000:10000"
+      - "10002:10002" # HiveServer2 Web UI
+    depends_on:
+      - namenode
+      - datanode
+      - spark-master
+      - hive-metastore
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hive_metastore_db_data:
+
+networks:
+  default:
+    name: hadoop_spark_hive_network 
