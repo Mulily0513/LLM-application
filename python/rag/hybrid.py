@@ -1,5 +1,5 @@
 import pandas as pd
-
+#data preprocess
 file_path = "./data/quora_duplicate_questions.tsv"
 df = pd.read_csv(file_path, sep="\t")
 questions = set()
@@ -12,16 +12,13 @@ for _, row in df.iterrows():
 
 docs = list(questions)
 
-print(docs[0])
-
+#embeding llm
 from milvus_model.hybrid import BGEM3EmbeddingFunction
-
 ef = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
 dense_dim = ef.dim["dense"]
-
 docs_embeddings = ef(docs)
 
-
+#insert to milvus
 from pymilvus import (
     connections,
     utility,
@@ -30,9 +27,7 @@ from pymilvus import (
     DataType,
     Collection,
 )
-
 connections.connect(uri="./milvus.db")
-
 fields = [
     # Use auto generated id as primary key
     FieldSchema(
@@ -46,19 +41,15 @@ fields = [
     FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=dense_dim),
 ]
 schema = CollectionSchema(fields)
-
 col_name = "hybrid_demo"
 if utility.has_collection(col_name):
     Collection(col_name).drop()
 col = Collection(col_name, schema, consistency_level="Strong")
-
 sparse_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}
 col.create_index("sparse_vector", sparse_index)
 dense_index = {"index_type": "AUTOINDEX", "metric_type": "IP"}
 col.create_index("dense_vector", dense_index)
 col.load()
-
-
 for i in range(0, len(docs), 50):
     batched_entities = [
         docs[i : i + 50],
@@ -67,20 +58,14 @@ for i in range(0, len(docs), 50):
     ]
     col.insert(batched_entities)
 print("Number of entities inserted:", col.num_entities)
-
-
 query = input("Enter your search query: ")
 print(query)
-
 query_embeddings = ef([query])
-
 
 from pymilvus import (
     AnnSearchRequest,
     WeightedRanker,
 )
-
-
 def dense_search(col, query_dense_embedding, limit=10):
     search_params = {"metric_type": "IP", "params": {}}
     res = col.search(
@@ -91,8 +76,6 @@ def dense_search(col, query_dense_embedding, limit=10):
         param=search_params,
     )[0]
     return [hit.get("text") for hit in res]
-
-
 def sparse_search(col, query_sparse_embedding, limit=10):
     search_params = {
         "metric_type": "IP",
@@ -106,8 +89,6 @@ def sparse_search(col, query_sparse_embedding, limit=10):
         param=search_params,
     )[0]
     return [hit.get("text") for hit in res]
-
-
 def hybrid_search(
     col,
     query_dense_embedding,
